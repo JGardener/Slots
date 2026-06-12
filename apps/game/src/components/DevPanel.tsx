@@ -23,6 +23,7 @@ function findSeed(bet: number, matches: (o: SpinOutcome) => boolean): number | n
 const FORCES: { label: string; matches: (o: SpinOutcome, bet: number) => boolean }[] = [
   { label: 'Any win', matches: (o) => o.totalWin > 0 },
   { label: 'Big win (≥25×)', matches: (o, bet) => o.totalWin >= bet * 25 },
+  { label: 'Mega win (≥100×)', matches: (o, bet) => o.totalWin >= bet * 100 },
   { label: 'Free spins', matches: (o) => o.triggeredFreeSpins },
 ];
 

@@ -8,6 +8,8 @@ export function Hud() {
   const gameState = useGameStore((s) => s.gameState);
   const lastOutcome = useGameStore((s) => s.lastOutcome);
   const lastFeature = useGameStore((s) => s.lastFeature);
+  const presentation = useGameStore((s) => s.presentation);
+  const featureTotalWin = useGameStore((s) => s.featureTotalWin);
   const bet = useGameStore((s) => s.bet);
   const turbo = useGameStore((s) => s.turbo);
   const spin = useGameStore((s) => s.spin);
@@ -15,10 +17,13 @@ export function Hud() {
   const requestStop = useGameStore((s) => s.requestStop);
   const setTurbo = useGameStore((s) => s.setTurbo);
 
-  const isIdle = gameState.type === 'idle';
-  // After spin() the FSM rests in `evaluating` while the reels animate.
+  // Idle means truly between rounds: FSM at rest AND no presentation beat
+  // (the outro still plays after the FSM returns to idle).
+  const isIdle = gameState.type === 'idle' && presentation.kind === 'none';
   const isAnimating = !isIdle;
   const canSpin = isIdle && gameState.balance >= bet;
+  /** Free-spins context while the feature runs (any mid-round state). */
+  const freeSpins = gameState.type === 'idle' ? null : gameState.freeSpins;
 
   return (
     <div style={styles.container}>
@@ -53,7 +58,7 @@ export function Hud() {
           disabled={!canSpin}
           style={{ ...styles.spinButton, ...(canSpin ? {} : styles.buttonDisabled) }}
         >
-          {isAnimating ? 'SPINNING…' : 'SPIN'}
+          {freeSpins ? 'FREE SPINS' : isAnimating ? 'SPINNING…' : 'SPIN'}
         </button>
 
         {isAnimating && (
@@ -63,6 +68,16 @@ export function Hud() {
         )}
       </div>
 
+      {freeSpins && (
+        <div style={styles.freeSpinsPanel}>
+          <div style={styles.label}>Free spins</div>
+          <div style={styles.value}>
+            {freeSpins.remaining} left · wins ×{freeSpins.multiplier}
+          </div>
+          <div style={styles.featureNote}>Feature win +{featureTotalWin.toLocaleString()}</div>
+        </div>
+      )}
+
       {isIdle && lastOutcome && (
         <div style={styles.section}>
           <div style={styles.label}>Last win</div>
@@ -71,8 +86,7 @@ export function Hud() {
           </div>
           {lastFeature && (
             <div style={styles.featureNote}>
-              Scatter! {lastFeature.spins} free spins paid +{lastFeature.totalWin.toLocaleString()}
-              {' '}(full presentation in Phase 3)
+              Free spins paid +{lastFeature.totalWin.toLocaleString()} over {lastFeature.spins} spins
             </div>
           )}
         </div>
@@ -119,6 +133,15 @@ const styles = {
   featureNote: {
     fontSize: '12px',
     color: '#ff6b9d',
+  },
+  freeSpinsPanel: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: '6px',
+    padding: '10px 12px',
+    backgroundColor: '#2a1a30',
+    border: '1px solid #ff6b9d',
+    borderRadius: '6px',
   },
   betSelector: {
     display: 'grid',

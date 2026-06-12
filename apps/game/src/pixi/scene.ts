@@ -2,6 +2,7 @@ import { GRID_COLS, GRID_ROWS, Symbol, LOW_PAYS, HIGH_PAYS } from '@slots/engine
 import { Container, Graphics } from 'pixi.js';
 import { PixiRenderer } from './renderer';
 import { SymbolPool, SYMBOL_BASE_SIZE } from './symbols';
+import { CelebrationOverlay, WinLinesView } from './overlays';
 
 /** Symbols cycled through while a reel is in motion (the "blur" strip). */
 const FILLER: readonly Symbol[] = [...LOW_PAYS, ...HIGH_PAYS, Symbol.Wild];
@@ -14,6 +15,10 @@ const FILLER: readonly Symbol[] = [...LOW_PAYS, ...HIGH_PAYS, Symbol.Wild];
 export class SlotScene {
   public reels: ReelView[] = [];
   public renderer: PixiRenderer;
+  /** Payline strokes, drawn above the reels in grid coordinates. */
+  public winLines = new WinLinesView();
+  /** Full-screen celebration layer (win tiers, free-spins intro/outro). */
+  public overlay = new CelebrationOverlay();
   private pool = new SymbolPool();
   private grid = new Container();
   private maskShape = new Graphics();
@@ -32,9 +37,11 @@ export class SlotScene {
       this.grid.addChild(reel.container);
     }
 
+    this.grid.addChild(this.winLines.graphics);
     this.grid.addChild(this.maskShape);
     this.grid.mask = this.maskShape;
     this.renderer.stage.addChild(this.grid);
+    this.renderer.stage.addChild(this.overlay.container);
     this.layout();
   }
 
@@ -50,6 +57,20 @@ export class SlotScene {
     for (let r = 0; r < this.reels.length; r++) {
       this.reels[r]!.layout(r * this.cellSize, this.cellSize);
     }
+    this.overlay.layout(width, height);
+  }
+
+  /** Current cell size in pixels — payline geometry uses this. */
+  getCellSize(): number {
+    return this.cellSize;
+  }
+
+  /**
+   * Holder container of the symbol visible at (reel, row). Valid while the
+   * reels are at rest — the win presentation pulses these via GSAP.
+   */
+  getSymbolHolder(reel: number, row: number): Container {
+    return this.reels[reel]!.getHolder(row);
   }
 
   /** Instantly show a grid (initial fill, recovery after remount mid-spin). */
@@ -150,6 +171,11 @@ export class ReelView {
   finishSpin(): void {
     this.setScroll(this.totalCells);
     this.inner.position.y = 0;
+  }
+
+  /** Holder of the visible symbol at `row` (0 = top). Valid at rest. */
+  getHolder(row: number): Container {
+    return this.cells[row + 1]!.holder;
   }
 
   /** Symbol entering at the top on the n-th advance (1-based). */
