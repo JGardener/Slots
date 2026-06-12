@@ -36,7 +36,7 @@ apps/game                React + PixiJS v8 + GSAP 3 (Vite, TS strict)
 - **Symbols:** 11 from asset pack — low pays (fruit), high pays (BAR, seven), Wild (bell, substitutes all except scatter), Scatter (strawberry).
 - **Free spins:** 3+ scatters → 10 free spins at 2× multiplier. Retrigger allowed once.
 - **Win tiers:** Win / Big Win / Mega Win at ~5× / 25× / 100× total bet — escalating FX and celebrations.
-- **Target RTP:** ~96%, hit frequency ~25–30%, scatter trigger ~1-in-150 spins. Locked in by CI sim test.
+- **Target RTP:** ~96%, hit frequency ~25–30%, scatter trigger ~1-in-150 spins. Locked in by CI sim test (measured: 96.05% RTP / 25.1% hit / 1-in-147 trigger at the certification seed; ~96.1% mean across 14 × 1M-spin runs).
 
 ## Tech stack
 
@@ -55,18 +55,18 @@ apps/game                React + PixiJS v8 + GSAP 3 (Vite, TS strict)
 
 ```
 packages/engine/
-├─ src/
-│  ├─ rng.ts               mulberry32 PRNG + seed/reset
-│  ├─ strips.ts            Reel definitions, weighted selection
-│  ├─ evaluator.ts         Payline logic, wild/scatter detection
-│  ├─ fsm.ts               State machine (discriminated unions)
-│  ├─ types.ts             All game types (SpinOutcome, Symbol, etc.)
-│  ├─ sim.ts               1M-spin RTP simulator
-│  └─ index.ts             Exports spin(), RNG, strips
-├─ tests/
-│  ├─ *.test.ts            Unit tests (hand-computed fixtures)
-│  └─ rtp.test.ts          1M-spin CI test asserting RTP ± tolerance
-└─ vitest.config.ts
+└─ src/
+   ├─ rng.ts               mulberry32 PRNG, seeded
+   ├─ strips.ts            Real reel tapes built from symbol counts (uniform stops = weighting)
+   ├─ paytable.ts          Line pays, scatter pays, free-spins config
+   ├─ evaluator.ts         Left-anchored payline logic, wild best-pay, scatter detection
+   ├─ paylines.ts          The 20 fixed lines
+   ├─ fsm.ts               State machine (discriminated unions, free-spins accounting)
+   ├─ types.ts             All game types (SpinOutcome, GameState, Symbol, …)
+   ├─ simulator.ts         Full-feature Monte Carlo sim (free spins + retrigger)
+   ├─ cli.ts               `pnpm sim` entry point
+   ├─ index.ts             Public exports
+   └─ *.test.ts            Co-located tests (hand-computed fixtures; simulator.test.ts is the 1M-spin CI gate)
 
 apps/game/
 ├─ src/
@@ -195,7 +195,7 @@ The asset pack (11 symbols, 44-frame animations, frames, popups, interface set) 
 1. Update `packages/engine/src/types.ts` (Symbol enum).
 2. Add strip weights in `packages/engine/src/strips.ts`.
 3. Add payline rows in `packages/engine/src/evaluator.ts`.
-4. Run the RTP sim: `pnpm sim --paytable` to tune hit frequency / RTP.
+4. Run the RTP sim: `pnpm sim` (options: `-- --spins N --bet B --seed S`) to tune hit frequency / RTP.
 5. Update the Pixi spritesheet and `apps/game/src/pixi/reels.ts` symbol → sprite mapping.
 6. Test: `pnpm test` asserts RTP is within tolerance.
 

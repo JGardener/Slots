@@ -1,146 +1,138 @@
-import type { GameState, GameEvent } from './types';
+import type { FreeSpinsCtx, GameEvent, GameState } from './types';
+import { FREE_SPINS } from './paytable';
 
 /**
- * FSM state machine for the game.
- * Validates state transitions and returns the new state or an error.
+ * Game state machine. Validates every transition and owns all balance
+ * accounting:
+ *
+ *   idle ──spin (deduct bet)──▶ spinning ──outcome-ready──▶ evaluating
+ *   evaluating ──presentation-complete (credit win)──▶ presenting-win
+ *   presenting-win ──presentation-complete──▶ idle | free-spins-mode
+ *   free-spins-mode ──spin (no deduction)──▶ spinning … (same loop)
+ *
+ * Free spins: triggered by the evaluator (3+ scatters), 10 spins at 2×,
+ * bet locked at trigger, one retrigger allowed per feature. The remaining
+ * count decrements as each free spin's presentation completes.
  */
 export class GameFsm {
   private state: GameState;
 
   constructor(initialBalance: number = 1000) {
-    this.state = {
-      type: 'idle',
-      balance: initialBalance,
-      bet: 10,
-      freeSpinsRemaining: 0,
-      freeSpinsMultiplier: 1,
-    };
+    this.state = { type: 'idle', balance: initialBalance, bet: 10 };
   }
 
   getState(): GameState {
     return this.state;
   }
 
-  /**
-   * Attempt a state transition given an event.
-   * Returns the new state or throws an error if the transition is invalid.
-   */
+  /** Apply an event. Returns the new state; throws on invalid transitions. */
   transition(event: GameEvent): GameState {
-    const currentState = this.state;
+    const current = this.state;
 
     switch (event.type) {
-      case 'spin':
-        if (currentState.type !== 'idle') {
-          throw new Error(`Cannot spin from state "${currentState.type}"`);
+      case 'spin': {
+        if (current.type === 'idle') {
+          if (current.balance < event.bet) {
+            throw new Error(`Insufficient balance: ${current.balance} < ${event.bet}`);
+          }
+          this.state = {
+            type: 'spinning',
+            balance: current.balance - event.bet,
+            bet: event.bet,
+            freeSpins: null,
+          };
+        } else if (current.type === 'free-spins-mode') {
+          // Free spins cost nothing; bet stays locked at the trigger value.
+          this.state = {
+            type: 'spinning',
+            balance: current.balance,
+            bet: current.bet,
+            freeSpins: current.freeSpins,
+          };
+        } else {
+          throw new Error(`Cannot spin from state "${current.type}"`);
         }
-        if (currentState.balance < event.bet) {
-          throw new Error(`Insufficient balance: ${currentState.balance} < ${event.bet}`);
-        }
-        this.state = {
-          type: 'spinning',
-          balance: currentState.balance - event.bet,
-          bet: event.bet,
-          freeSpinsRemaining: currentState.freeSpinsRemaining,
-          freeSpinsMultiplier: currentState.freeSpinsMultiplier,
-        };
         return this.state;
+      }
 
-      case 'outcome-ready':
-        if (currentState.type !== 'spinning') {
-          throw new Error(`Cannot receive outcome from state "${currentState.type}"`);
+      case 'outcome-ready': {
+        if (current.type !== 'spinning') {
+          throw new Error(`Cannot receive outcome from state "${current.type}"`);
         }
         this.state = {
           type: 'evaluating',
-          balance: currentState.balance,
-          bet: currentState.bet,
+          balance: current.balance,
+          bet: current.bet,
           outcome: event.outcome,
-          freeSpinsRemaining: currentState.freeSpinsRemaining,
-          freeSpinsMultiplier: currentState.freeSpinsMultiplier,
+          freeSpins: current.freeSpins,
         };
         return this.state;
+      }
 
-      case 'presentation-complete':
-        if (currentState.type === 'evaluating') {
-          // Evaluating → WinPresentation
+      case 'presentation-complete': {
+        if (current.type === 'evaluating') {
+          // Win presentation starts: credit the (already resolved) win.
           this.state = {
             type: 'presenting-win',
-            balance: currentState.balance + (currentState.outcome?.totalWin || 0),
-            bet: currentState.bet,
-            outcome: currentState.outcome,
-            freeSpinsRemaining: currentState.freeSpinsRemaining,
-            freeSpinsMultiplier: currentState.freeSpinsMultiplier,
+            balance: current.balance + current.outcome.totalWin,
+            bet: current.bet,
+            outcome: current.outcome,
+            freeSpins: current.freeSpins,
           };
           return this.state;
-        } else if (currentState.type === 'presenting-win') {
-          // WinPresentation → Idle or FreeSpin
-          if (currentState.outcome.triggeredFreeSpins) {
-            this.state = {
-              type: 'free-spins-mode',
-              balance: currentState.balance,
-              bet: currentState.bet,
-              freeSpinsRemaining: currentState.freeSpinsRemaining + currentState.outcome.freeSpinsCount,
-              freeSpinsMultiplier: currentState.freeSpinsMultiplier * currentState.outcome.freeSpinsCount,
-            };
-          } else {
-            this.state = {
-              type: 'idle',
-              balance: currentState.balance,
-              bet: currentState.bet,
-              freeSpinsRemaining: currentState.freeSpinsRemaining,
-              freeSpinsMultiplier: currentState.freeSpinsMultiplier,
-            };
-          }
-          return this.state;
-        } else if (currentState.type === 'free-spins-mode') {
-          // FreeSpin auto-spin completed, decrement
-          const remaining = currentState.freeSpinsRemaining - 1;
-          if (remaining <= 0) {
-            this.state = {
-              type: 'idle',
-              balance: currentState.balance,
-              bet: currentState.bet,
-              freeSpinsRemaining: 0,
-              freeSpinsMultiplier: 1,
-            };
-          } else {
-            this.state = {
-              type: 'idle',
-              balance: currentState.balance,
-              bet: currentState.bet,
-              freeSpinsRemaining: remaining,
-              freeSpinsMultiplier: currentState.freeSpinsMultiplier,
-            };
-          }
-          return this.state;
-        } else {
-          throw new Error(`Cannot complete presentation from state "${currentState.type}"`);
         }
 
-      case 'free-spin-start':
-        if (currentState.type !== 'evaluating' && currentState.type !== 'presenting-win') {
-          throw new Error(`Cannot start free spins from state "${currentState.type}"`);
+        if (current.type === 'presenting-win') {
+          this.state = this.afterPresentation(current);
+          return this.state;
         }
-        this.state = {
-          type: 'free-spins-mode',
-          balance: currentState.balance,
-          bet: currentState.bet,
-          freeSpinsRemaining: event.count,
-          freeSpinsMultiplier: event.multiplier,
-        };
-        return this.state;
 
-      case 'reset':
-        this.state = {
-          type: 'idle',
-          balance: currentState.balance,
-          bet: 10,
-          freeSpinsRemaining: 0,
-          freeSpinsMultiplier: 1,
-        };
-        return this.state;
+        throw new Error(`Cannot complete presentation from state "${current.type}"`);
+      }
 
-      default:
-        throw new Error(`Unknown event type`);
+      case 'reset': {
+        this.state = { type: 'idle', balance: current.balance, bet: current.bet };
+        return this.state;
+      }
     }
+  }
+
+  /** Resolve where the round ends: back to idle, or into/through free spins. */
+  private afterPresentation(
+    current: Extract<GameState, { type: 'presenting-win' }>
+  ): GameState {
+    const { balance, bet, outcome, freeSpins } = current;
+
+    if (freeSpins === null) {
+      // Base-game round: a trigger starts the feature.
+      if (outcome.triggeredFreeSpins) {
+        return {
+          type: 'free-spins-mode',
+          balance,
+          bet,
+          freeSpins: {
+            remaining: outcome.freeSpinsCount,
+            multiplier: FREE_SPINS.multiplier,
+            retriggered: false,
+          },
+        };
+      }
+      return { type: 'idle', balance, bet };
+    }
+
+    // Free-spin round: consume one spin, apply at most one retrigger.
+    let next: FreeSpinsCtx = { ...freeSpins, remaining: freeSpins.remaining - 1 };
+    if (outcome.triggeredFreeSpins && !next.retriggered) {
+      next = {
+        ...next,
+        remaining: next.remaining + outcome.freeSpinsCount,
+        retriggered: true,
+      };
+    }
+
+    if (next.remaining > 0) {
+      return { type: 'free-spins-mode', balance, bet, freeSpins: next };
+    }
+    return { type: 'idle', balance, bet };
   }
 }

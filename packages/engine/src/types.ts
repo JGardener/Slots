@@ -1,6 +1,7 @@
 /**
  * Core game types: symbols, paylines, outcomes, and FSM states.
- * The RNG is deterministic; all math is pure.
+ * All math is pure and deterministic; money amounts are in credits
+ * unless a name says otherwise.
  */
 
 export enum Symbol {
@@ -54,14 +55,16 @@ export const GRID_ROWS = 3;
 export type Payline = readonly [number, number, number, number, number];
 
 /**
- * A winning position on a single payline.
+ * A winning payline. `symbol`/`count` describe the paying interpretation
+ * after the wild best-pay rule (a wild-led line pays as whichever of
+ * "wilds as themselves" or "wilds substituting" is worth more).
  */
 export interface Win {
   paylineIndex: number;
   symbol: Symbol;
-  count: number; // Consecutive symbols (including wilds) from the left
-  multiplier: number; // 2x, 3x, etc. based on payline/reel
-  payout: number; // In units of bet size (e.g., 10 = 10× bet)
+  count: number; // Consecutive matching symbols anchored at reel 0
+  multiplier: number; // 1 in base game, the free-spins multiplier during the feature
+  payout: number; // Credits (already scaled by bet and multiplier)
 }
 
 /**
@@ -70,7 +73,7 @@ export interface Win {
  */
 export interface SpinOutcome {
   rng: { seed: number }; // For reproducibility in dev panel / tests
-  stops: readonly [number, number, number, number, number]; // Row index at each reel
+  stops: readonly [number, number, number, number, number]; // Strip position per reel
   symbols: readonly [
     readonly Symbol[],
     readonly Symbol[],
@@ -79,49 +82,50 @@ export interface SpinOutcome {
     readonly Symbol[]
   ]; // Full visible grid (3 per reel)
   wins: Win[];
-  totalWin: number; // Total payout (units of bet)
-  scatters: number; // How many scatter symbols appeared
-  triggeredFreeSpins: boolean;
-  freeSpinsCount: number; // If triggered, how many (e.g. 10)
+  scatterWin: number; // Credits from scatter pays (included in totalWin)
+  totalWin: number; // Total credits won (line wins + scatter pays)
+  scatters: number; // Scatter symbols anywhere on the grid
+  triggeredFreeSpins: boolean; // 3+ scatters (a retrigger when already in free spins)
+  freeSpinsCount: number; // Spins awarded when triggered (e.g. 10)
+}
+
+/**
+ * Free-spins feature context carried through FSM states.
+ */
+export interface FreeSpinsCtx {
+  remaining: number;
+  multiplier: number;
+  retriggered: boolean; // Retrigger is allowed once per feature
 }
 
 /**
  * Game state machine: discriminated unions for exhaustive state coverage.
+ * `freeSpins` is null in base-game spins, populated during the feature.
  */
 export type GameState =
-  | { type: 'idle'; balance: number; bet: number; freeSpinsRemaining: number; freeSpinsMultiplier: number }
-  | { type: 'spinning'; balance: number; bet: number; freeSpinsRemaining: number; freeSpinsMultiplier: number }
+  | { type: 'idle'; balance: number; bet: number }
+  | { type: 'spinning'; balance: number; bet: number; freeSpins: FreeSpinsCtx | null }
   | {
       type: 'evaluating';
       balance: number;
       bet: number;
       outcome: SpinOutcome;
-      freeSpinsRemaining: number;
-      freeSpinsMultiplier: number;
+      freeSpins: FreeSpinsCtx | null;
     }
   | {
       type: 'presenting-win';
       balance: number;
       bet: number;
       outcome: SpinOutcome;
-      freeSpinsRemaining: number;
-      freeSpinsMultiplier: number;
+      freeSpins: FreeSpinsCtx | null;
     }
-  | {
-      type: 'free-spins-mode';
-      balance: number;
-      bet: number;
-      freeSpinsRemaining: number;
-      freeSpinsMultiplier: number;
-    };
+  | { type: 'free-spins-mode'; balance: number; bet: number; freeSpins: FreeSpinsCtx };
 
 /**
  * FSM transition events.
  */
 export type GameEvent =
-  | { type: 'spin'; bet: number }
+  | { type: 'spin'; bet: number } // bet is ignored during free spins (locked at trigger)
   | { type: 'outcome-ready'; outcome: SpinOutcome }
   | { type: 'presentation-complete' }
-  | { type: 'free-spin-start'; count: number; multiplier: number }
-  | { type: 'free-spins-complete' }
   | { type: 'reset' };

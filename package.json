@@ -7,6 +7,7 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
+    "sim": "pnpm --filter @slots/engine sim",
     "lint": "eslint .",
     "format": "prettier --write ."
   },

@@ -1,95 +1,109 @@
 import { Symbol, GRID_ROWS } from './types';
-import type { Rng } from './rng';
+import { createRng, type Rng } from './rng';
 
 /**
- * Reel strip: an ordered list of symbols. A reel stop selects symbols
- * from this list starting at the chosen position (wrapping around).
- * The stop position is selected via weighted RNG.
- *
- * Each reel has one strip. The distribution of symbols in the strip
- * determines hit frequency, RTP, and scatter trigger rate.
+ * A reel strip is an ordered, cyclic list of symbol positions — the
+ * physical tape of a mechanical reel. A spin picks one stop position
+ * uniformly per reel; the visible window is GRID_ROWS consecutive
+ * positions from there. Symbol frequency on the tape IS the weighting;
+ * there is no separate weights table.
  */
 export interface ReelStrip {
   symbols: readonly Symbol[];
-  weights?: readonly number[]; // If provided, use weighted selection; else uniform
 }
 
 /**
- * Create a weighted strip from a symbol and occurrence count.
- * E.g., createWeightedStrip([Symbol.Wild, 2, Symbol.Orange, 8])
- * creates a strip with 2 wilds and 8 oranges.
+ * Symbol counts per reel. Tuned with the Monte Carlo sim (`pnpm sim`):
+ * scatter count drives the free-spins trigger rate, wild and low-pay
+ * counts drive hit frequency, and together with the paytable they set RTP.
  */
-export function createWeightedStrip(counts: readonly (Symbol | number)[]): ReelStrip {
-  const symbols: Symbol[] = [];
-  const weights: number[] = [];
+const REEL_COUNTS: readonly Partial<Record<Symbol, number>>[] = [
+  // 65 positions per reel; 2 scatters each → window p = 6/65 ≈ 1-in-148 trigger.
+  // Reel 1 — fewer wilds on the anchor reel keeps left-anchored runs honest.
+  { [Symbol.Scatter]: 2, [Symbol.Wild]: 1, [Symbol.Seven]: 4, [Symbol.BAR]: 5, [Symbol.Orange]: 8, [Symbol.Lemon]: 7, [Symbol.Cherry]: 7, [Symbol.Plum]: 8, [Symbol.Banana]: 7, [Symbol.Grapes]: 8, [Symbol.Watermelon]: 8 },
+  { [Symbol.Scatter]: 2, [Symbol.Wild]: 2, [Symbol.Seven]: 4, [Symbol.BAR]: 5, [Symbol.Orange]: 7, [Symbol.Lemon]: 8, [Symbol.Cherry]: 8, [Symbol.Plum]: 7, [Symbol.Banana]: 8, [Symbol.Grapes]: 7, [Symbol.Watermelon]: 7 },
+  { [Symbol.Scatter]: 2, [Symbol.Wild]: 2, [Symbol.Seven]: 4, [Symbol.BAR]: 5, [Symbol.Orange]: 8, [Symbol.Lemon]: 7, [Symbol.Cherry]: 7, [Symbol.Plum]: 8, [Symbol.Banana]: 7, [Symbol.Grapes]: 8, [Symbol.Watermelon]: 7 },
+  { [Symbol.Scatter]: 2, [Symbol.Wild]: 2, [Symbol.Seven]: 4, [Symbol.BAR]: 5, [Symbol.Orange]: 7, [Symbol.Lemon]: 7, [Symbol.Cherry]: 7, [Symbol.Plum]: 7, [Symbol.Banana]: 8, [Symbol.Grapes]: 8, [Symbol.Watermelon]: 8 },
+  { [Symbol.Scatter]: 2, [Symbol.Wild]: 1, [Symbol.Seven]: 4, [Symbol.BAR]: 5, [Symbol.Orange]: 7, [Symbol.Lemon]: 8, [Symbol.Cherry]: 8, [Symbol.Plum]: 8, [Symbol.Banana]: 7, [Symbol.Grapes]: 8, [Symbol.Watermelon]: 7 },
+];
 
-  for (let i = 0; i < counts.length; i += 2) {
-    const sym = counts[i] as Symbol;
-    const count = counts[i + 1] as number;
-    symbols.push(sym);
-    weights.push(count);
-  }
-
-  return { symbols, weights };
-}
+/** Fixed seed: strips are data, generated once and identical every run. */
+const STRIP_LAYOUT_SEED = 0x5107;
 
 /**
- * Factory for 5 reels. Each reel's strip is independent.
- * Weighting is tuned to achieve target RTP and hit frequency.
- *
- * This is a starting point; the RTP simulation will drive adjustments.
+ * Layout constraints, checked cyclically:
+ * - scatters at least GRID_ROWS apart → at most one scatter per window,
+ *   so the per-reel window probability is exactly 3 × count / length
+ * - wilds at least GRID_ROWS apart → at most one wild per window
+ * - no 3+ identical consecutive symbols → no single-reel triple in a window
  */
-export function createReels(): readonly ReelStrip[] {
-  // All reels use the same strip for simplicity, but can be customized.
-  const baseStrip = createWeightedStrip([
-    Symbol.Scatter, 1,  // ~1.6% scatter chance per reel (tuned for ~1% free spin trigger)
-    Symbol.Wild, 4,     // ~6.7% wild
-    Symbol.BAR, 3,      // ~5% high pay
-    Symbol.Seven, 3,    // ~5% high pay
-    Symbol.Orange, 15,  // ~25% each low pay
-    Symbol.Lemon, 15,
-    Symbol.Plum, 10,
-    Symbol.Banana, 10,
-    Symbol.Cherry, 8,
-    Symbol.Grapes, 8,
-    Symbol.Watermelon, 7,  // Increased to compensate for scatter reduction
-  ]);
+function violatesAt(symbols: readonly Symbol[], index: number): boolean {
+  const n = symbols.length;
+  const sym = symbols[index]!;
 
-  return [baseStrip, baseStrip, baseStrip, baseStrip, baseStrip];
-}
-
-/**
- * Select a symbol from a strip using weighted RNG.
- * Weights default to uniform (each symbol equally likely).
- */
-export function selectSymbol(strip: ReelStrip, rng: Rng): Symbol {
-  const { symbols, weights } = strip;
-
-  if (!weights) {
-    // Uniform selection
-    const idx = rng.nextInt(symbols.length);
-    return symbols[idx]!;
-  }
-
-  // Weighted selection
-  const total = weights.reduce((a, b) => a + b, 0);
-  let roll = rng.next() * total;
-
-  for (let i = 0; i < symbols.length; i++) {
-    roll -= weights[i]!;
-    if (roll < 0) {
-      return symbols[i]!;
+  if (sym === Symbol.Scatter || sym === Symbol.Wild) {
+    for (let d = 1; d < GRID_ROWS; d++) {
+      if (symbols[(index + d) % n] === sym || symbols[(index - d + n) % n] === sym) {
+        return true;
+      }
     }
   }
 
-  return symbols[symbols.length - 1]!; // Fallback (shouldn't happen)
+  const prev = symbols[(index - 1 + n) % n];
+  const next = symbols[(index + 1) % n];
+  const prev2 = symbols[(index - 2 + n) % n];
+  const next2 = symbols[(index + 2) % n];
+  return (prev === sym && (prev2 === sym || next === sym)) || (next === sym && next2 === sym);
 }
 
 /**
- * Select reel stop indices (0 to strip.length - 1 for each reel).
- * Returns one stop per reel.
+ * Build one strip: expand counts to a bag, shuffle deterministically,
+ * then repair constraint violations by swapping offenders to random
+ * positions until the layout is clean.
  */
-export function selectStops(reels: readonly ReelStrip[], rng: Rng): readonly [number, number, number, number, number] {
+export function buildStrip(counts: Partial<Record<Symbol, number>>, rng: Rng): ReelStrip {
+  const symbols: Symbol[] = [];
+  for (const [key, count] of Object.entries(counts)) {
+    const sym = Number(key) as Symbol;
+    for (let i = 0; i < (count ?? 0); i++) symbols.push(sym);
+  }
+
+  // Fisher–Yates
+  for (let i = symbols.length - 1; i > 0; i--) {
+    const j = rng.nextInt(i + 1);
+    [symbols[i], symbols[j]] = [symbols[j]!, symbols[i]!];
+  }
+
+  // Constraint repair
+  for (let attempt = 0; attempt < 10_000; attempt++) {
+    const bad = symbols.findIndex((_, i) => violatesAt(symbols, i));
+    if (bad === -1) return { symbols };
+    const swapWith = rng.nextInt(symbols.length);
+    [symbols[bad], symbols[swapWith]] = [symbols[swapWith]!, symbols[bad]!];
+  }
+  throw new Error('buildStrip: could not satisfy layout constraints');
+}
+
+let cachedReels: readonly ReelStrip[] | null = null;
+
+/** The five production reels. Deterministic; built once and cached. */
+export function createReels(): readonly ReelStrip[] {
+  if (!cachedReels) {
+    const rng = createRng(STRIP_LAYOUT_SEED);
+    cachedReels = REEL_COUNTS.map((counts) => buildStrip(counts, rng));
+  }
+  return cachedReels;
+}
+
+/**
+ * Select reel stop positions, uniform over each strip's length.
+ * Uniform stops over a weighted tape is the entire math model —
+ * exactly how physical reels work.
+ */
+export function selectStops(
+  reels: readonly ReelStrip[],
+  rng: Rng
+): readonly [number, number, number, number, number] {
   return [
     rng.nextInt(reels[0]!.symbols.length),
     rng.nextInt(reels[1]!.symbols.length),
@@ -100,21 +114,14 @@ export function selectStops(reels: readonly ReelStrip[], rng: Rng): readonly [nu
 }
 
 /**
- * Extract visible symbols from a reel, starting at `stopIndex`.
- * Returns GRID_ROWS (3) symbols, wrapping around the strip.
+ * Extract the visible window: GRID_ROWS consecutive symbols starting at
+ * `stopIndex`, wrapping around the strip.
  */
 export function getVisibleSymbols(strip: ReelStrip, stopIndex: number): readonly Symbol[] {
   const { symbols } = strip;
   const result: Symbol[] = [];
-
   for (let i = 0; i < GRID_ROWS; i++) {
-    const idx = (stopIndex + i) % symbols.length;
-    const sym = symbols[idx];
-    if (sym === undefined) {
-      throw new Error(`Invalid symbol at index ${idx}`);
-    }
-    result.push(sym);
+    result.push(symbols[(stopIndex + i) % symbols.length]!);
   }
-
   return result;
 }

@@ -7,6 +7,7 @@ import { useGameStore, BET_LEVELS } from '../store';
 export function Hud() {
   const gameState = useGameStore((s) => s.gameState);
   const lastOutcome = useGameStore((s) => s.lastOutcome);
+  const lastFeature = useGameStore((s) => s.lastFeature);
   const bet = useGameStore((s) => s.bet);
   const turbo = useGameStore((s) => s.turbo);
   const spin = useGameStore((s) => s.spin);
@@ -68,8 +69,11 @@ export function Hud() {
           <div style={{ ...styles.value, color: lastOutcome.totalWin > 0 ? '#f1c40f' : '#666' }}>
             {lastOutcome.totalWin > 0 ? `+${lastOutcome.totalWin.toLocaleString()}` : '—'}
           </div>
-          {lastOutcome.triggeredFreeSpins && (
-            <div style={styles.featureNote}>Scatter hit! Free spins land in Phase 3.</div>
+          {lastFeature && (
+            <div style={styles.featureNote}>
+              Scatter! {lastFeature.spins} free spins paid +{lastFeature.totalWin.toLocaleString()}
+              {' '}(full presentation in Phase 3)
+            </div>
           )}
         </div>
       )}

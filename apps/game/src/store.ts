@@ -21,6 +21,11 @@ export const BET_LEVELS = [1, 5, 10, 25, 50, 100] as const;
 interface GameStore {
   gameState: GameState;
   lastOutcome: SpinOutcome | null;
+  /**
+   * Result of the last free-spins feature, resolved instantly by settle().
+   * Full free-spins presentation is Phase 3 scope.
+   */
+  lastFeature: { spins: number; totalWin: number } | null;
   /** Increments on every spin; the Pixi layer keys animations off it. */
   spinId: number;
 
@@ -55,6 +60,7 @@ interface GameStore {
 export const useGameStore = create<GameStore>((set, get) => ({
   gameState: fsm.getState(),
   lastOutcome: null,
+  lastFeature: null,
   spinId: 0,
 
   bet: 10,
@@ -82,6 +88,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     set({
       gameState: fsm.getState(),
       lastOutcome: outcome,
+      lastFeature: null,
       spinId: s.spinId + 1,
       // Forced spins don't consume the seeded sequence.
       spinCount: s.forcedSeed === null ? s.spinCount + 1 : s.spinCount,
@@ -96,12 +103,35 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (get().gameState.type !== 'evaluating') return;
     fsm.transition({ type: 'presentation-complete' }); // → presenting-win (credits win)
     fsm.transition({ type: 'presentation-complete' }); // → idle | free-spins-mode
-    if (fsm.getState().type === 'free-spins-mode') {
-      // Free-spins mode is Phase 3 scope (the engine FSM's accounting needs
-      // work there too). Until then a scatter trigger is presentational only.
-      fsm.transition({ type: 'reset' });
+
+    // Free-spins presentation lands in Phase 3. Until then, resolve the
+    // feature through the engine immediately so the balance stays honest:
+    // free spins cost nothing, pay at the feature multiplier, and may
+    // retrigger once — all enforced by the FSM.
+    let featureWin = 0;
+    let featureSpins = 0;
+    let spinCount = get().spinCount;
+    const seed = get().seed;
+
+    let state = fsm.getState();
+    while (state.type === 'free-spins-mode') {
+      fsm.transition({ type: 'spin', bet: state.bet });
+      const outcome = engineSpin(state.bet, seed + spinCount, true, state.freeSpins.multiplier);
+      spinCount++;
+      fsm.transition({ type: 'outcome-ready', outcome });
+      fsm.transition({ type: 'presentation-complete' });
+      fsm.transition({ type: 'presentation-complete' });
+      featureWin += outcome.totalWin;
+      featureSpins++;
+      state = fsm.getState();
     }
-    set({ gameState: fsm.getState() });
+
+    set({
+      gameState: state,
+      spinCount,
+      totalWon: get().totalWon + featureWin,
+      lastFeature: featureSpins > 0 ? { spins: featureSpins, totalWin: featureWin } : null,
+    });
   },
 
   setBet: (bet) => {
