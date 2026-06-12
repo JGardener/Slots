@@ -104,7 +104,7 @@ describe('Payline evaluation', () => {
       [Symbol.Orange, Symbol.Orange, Symbol.Banana],
     ] as const;
 
-    const result = evaluateSpin(grid as any, 10, false, 1);
+    const result = evaluateSpin(grid as unknown as Parameters<typeof evaluateSpin>[0], 10, false, 1);
 
     // Should have at least one win on the middle line (5 oranges = 20× bet per the paytable)
     expect(result.wins.length).toBeGreaterThan(0);
@@ -121,7 +121,7 @@ describe('Payline evaluation', () => {
       [Symbol.Orange, Symbol.Wild, Symbol.Banana],
     ] as const;
 
-    const result = evaluateSpin(grid as any, 10, false, 1);
+    const result = evaluateSpin(grid as unknown as Parameters<typeof evaluateSpin>[0], 10, false, 1);
 
     // Should detect the win with wild substitution
     expect(result.wins.length).toBeGreaterThan(0);
@@ -137,7 +137,7 @@ describe('Payline evaluation', () => {
       [Symbol.Orange, Symbol.Orange, Symbol.Banana],
     ] as const;
 
-    const result = evaluateSpin(grid as any, 10, false, 1);
+    const result = evaluateSpin(grid as unknown as Parameters<typeof evaluateSpin>[0], 10, false, 1);
 
     expect(result.scatterCount).toBe(3);
     expect(result.triggeredFreeSpins).toBe(true);
@@ -154,7 +154,7 @@ describe('Payline evaluation', () => {
       [Symbol.Orange, Symbol.Orange, Symbol.Banana],
     ] as const;
 
-    const result = evaluateSpin(grid as any, 10, false, 1);
+    const result = evaluateSpin(grid as unknown as Parameters<typeof evaluateSpin>[0], 10, false, 1);
 
     expect(result.scatterCount).toBe(2);
     expect(result.triggeredFreeSpins).toBe(false);
@@ -169,10 +169,10 @@ describe('Payline evaluation', () => {
       [Symbol.Orange, Symbol.Orange, Symbol.Banana],
     ] as const;
 
-    const result = evaluateSpin(grid as any, 10, true, 2);
+    const result = evaluateSpin(grid as unknown as Parameters<typeof evaluateSpin>[0], 10, true, 2);
 
     // With 2× free spin multiplier, payouts should be doubled
-    const resultNoMultiplier = evaluateSpin(grid as any, 10, false, 1);
+    const resultNoMultiplier = evaluateSpin(grid as unknown as Parameters<typeof evaluateSpin>[0], 10, false, 1);
     if (result.wins.length > 0 && resultNoMultiplier.wins.length > 0) {
       expect(result.totalWin).toBeGreaterThanOrEqual(resultNoMultiplier.totalWin);
     }

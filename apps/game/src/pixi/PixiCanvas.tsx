@@ -1,60 +1,48 @@
-import { createRng } from '@slots/engine';
-import gsap from 'gsap';
-import { Application, Container, Graphics } from 'pixi.js';
 import { useEffect, useRef } from 'react';
+import { SlotScene } from './scene';
+import { playSpin, type SpinHandle } from '../motion/spin';
+import { useGameStore } from '../store';
 
 /**
- * Phase 0 smoke scene: React owns the host element, Pixi renders imperatively
- * inside it, GSAP drives all motion, and the symbol tints come from the
- * engine's seeded RNG — one spinning "reel" of diamonds proving every layer
- * of the stack end-to-end.
+ * React↔Pixi bridge. React owns the host div; the scene renders
+ * imperatively inside it. Effects key off store changes:
+ *   spinId      → play the spin timeline for the resolved outcome
+ *   stopRequest → quick-stop the running timeline
+ *   turbo       → retime the running timeline
  */
 export function PixiCanvas() {
   const hostRef = useRef<HTMLDivElement>(null);
+  const sceneRef = useRef<SlotScene | null>(null);
+  const spinRef = useRef<SpinHandle | null>(null);
+
+  const spinId = useGameStore((s) => s.spinId);
+  const stopRequest = useGameStore((s) => s.stopRequest);
+  const turbo = useGameStore((s) => s.turbo);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
 
-    const app = new Application();
     let status: 'booting' | 'ready' | 'disposed' = 'booting';
-    const timeline = gsap.timeline();
+    const scene = new SlotScene(host);
 
     const boot = async () => {
-      await app.init({ background: '#0d0d14', resizeTo: host, antialias: true });
-      // React StrictMode mounts effects twice; if cleanup ran mid-init, bail out.
+      await scene.init();
+      // React StrictMode mounts effects twice; if cleanup ran mid-init, bail.
       if (status === 'disposed') {
-        app.destroy(true);
+        scene.dispose();
         return;
       }
       status = 'ready';
-      host.appendChild(app.canvas);
+      sceneRef.current = scene;
 
-      const rng = createRng(2026);
-      const wheel = new Container();
-      app.stage.addChild(wheel);
-
-      const SYMBOLS = 8;
-      const RADIUS = 160;
-      for (let i = 0; i < SYMBOLS; i++) {
-        const angle = (i / SYMBOLS) * Math.PI * 2;
-        const tint = 0x806030 + rng.nextInt(0x7fa0c0);
-        const diamond = new Graphics().rect(-24, -24, 48, 48).fill(tint);
-        diamond.rotation = Math.PI / 4;
-        diamond.position.set(Math.cos(angle) * RADIUS, Math.sin(angle) * RADIUS);
-        wheel.addChild(diamond);
+      // If a spin resolved before the scene was ready (fast click, remount
+      // mid-spin), skip the animation: show the result and settle the FSM.
+      const { gameState, lastOutcome, settle } = useGameStore.getState();
+      if (gameState.type === 'evaluating' && lastOutcome) {
+        scene.setGrid(lastOutcome.symbols);
+        settle();
       }
-
-      const layout = () => {
-        wheel.position.set(app.screen.width / 2, app.screen.height / 2);
-      };
-      layout();
-      app.renderer.on('resize', layout);
-
-      timeline
-        .from(wheel, { alpha: 0, duration: 0.8, ease: 'power2.out' })
-        .from(wheel.scale, { x: 0.6, y: 0.6, duration: 0.8, ease: 'back.out(1.7)' }, 0)
-        .to(wheel, { rotation: Math.PI * 2, duration: 12, repeat: -1, ease: 'none' }, 0);
     };
 
     void boot();
@@ -62,12 +50,39 @@ export function PixiCanvas() {
     return () => {
       const wasReady = status === 'ready';
       status = 'disposed';
-      timeline.kill();
-      if (wasReady) {
-        app.destroy(true, { children: true });
-      }
+      spinRef.current?.kill();
+      spinRef.current = null;
+      sceneRef.current = null;
+      if (wasReady) scene.dispose();
     };
   }, []);
+
+  // A new spin resolved: animate the reels to the outcome, then settle.
+  useEffect(() => {
+    if (spinId === 0) return;
+    const scene = sceneRef.current;
+    const { lastOutcome, settle, turbo: turboNow } = useGameStore.getState();
+    if (!scene || !lastOutcome) return;
+
+    spinRef.current?.kill();
+    spinRef.current = playSpin({
+      reels: scene.reels,
+      finalGrid: lastOutcome.symbols,
+      turbo: turboNow,
+      onComplete: () => {
+        spinRef.current = null;
+        settle();
+      },
+    });
+  }, [spinId]);
+
+  useEffect(() => {
+    if (stopRequest > 0) spinRef.current?.quickStop();
+  }, [stopRequest]);
+
+  useEffect(() => {
+    spinRef.current?.setTurbo(turbo);
+  }, [turbo]);
 
   return <div ref={hostRef} style={{ position: 'absolute', inset: 0 }} />;
 }

@@ -1,4 +1,4 @@
-import { type Rng, createRng } from './rng';
+import { createRng } from './rng';
 import type { SpinOutcome, Symbol } from './types';
 import { createReels, selectStops, getVisibleSymbols } from './strips';
 import { evaluateSpin } from './evaluator';

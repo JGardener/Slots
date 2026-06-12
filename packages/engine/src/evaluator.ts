@@ -1,4 +1,4 @@
-import { Symbol, HIGH_PAYS, GRID_COLS, GRID_ROWS, type Win, type SpinOutcome } from './types';
+import { Symbol, GRID_COLS, GRID_ROWS, type Win } from './types';
 import { PAYLINES, NUM_PAYLINES } from './paylines';
 
 /**
