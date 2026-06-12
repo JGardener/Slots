@@ -1,3 +1,6 @@
+# Source art pack (347MB, local only) — packed spritesheets in apps/game are committed instead
+assets/
+
 node_modules/
 dist/
 coverage/

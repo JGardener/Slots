@@ -23,7 +23,7 @@ A portfolio slot game targeting **iGaming/slots studio roles**, built to demonst
 | Repo | pnpm workspace: `packages/engine` (pure TS, zero deps) + `apps/game` | Dependency arrow physically enforces "engine knows nothing about rendering" |
 | Testing | Engine fully unit-tested (Vitest), 1M-spin RTP sim asserting RTP ± tolerance in CI, one Playwright smoke test | High signal, bounded effort; GitHub Actions |
 | FX bar | Pixi filters (reel motion blur, symbol glow), particle bursts, three win tiers with GSAP count-up rollup | Expected production polish without the custom-shader time sink |
-| Theme | TBD — pick the best coherent pack available (≥10 symbols + frame + background) | Art quality beats theme preference |
+| Theme | **Classic fruit/Vegas** — pack acquired (in local `assets/`, gitignored at 347MB): 11 symbols with 44-frame win animations (wild bell, scatter strawberry, BAR, seven, fruit lows), frames, paylines, popups, full interface set | Source art stays local; the Phase 2 asset pipeline packs optimized spritesheets into `apps/game`, which are committed |
 | Presentation | Vercel demo (preloader w/ progress), README as an engineering tour with architecture diagram, RTP results table, big-win GIFs | The README sells before anyone reads code |
 | Timeline | Evenings/weekends, ~4–6 weeks (~60–80h), shippable milestone per phase | Slots absorb infinite polish; phase gates keep it demo-able if life intervenes |
 
@@ -32,7 +32,7 @@ A portfolio slot game targeting **iGaming/slots studio roles**, built to demonst
 ## Game design spec
 
 - **Grid:** 5 reels × 3 rows, ~20 fixed paylines (left-to-right, line pays).
-- **Symbols:** ~10 — low pays (card royals or pack equivalents), high pays, **Wild** (substitutes all except scatter), **Scatter**.
+- **Symbols:** 11 from the pack — low pays (orange, lemon, plum, banana, cherry, grapes, watermelon, strawberry as available), high pays (BAR, seven), **Wild** (bell — substitutes all except scatter), **Scatter** (strawberry). Final low/high split tuned during Phase 1 RTP balancing.
 - **Free spins:** 3+ scatters anywhere → 10 free spins at 2× multiplier. Retrigger allowed once. (Tune during RTP balancing.)
 - **Win tiers:** Win / Big Win / Mega Win at ~5× / 25× / 100× total bet, escalating celebrations.
 - **Bet model:** fake credits, selectable bet levels. No real money, no accounts — state a responsible-gaming/demo disclaimer.
